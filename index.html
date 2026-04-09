@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FAAVZORANT</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #111; /* Menü arka planı koyu */
+            font-family: Arial, sans-serif;
+            cursor: default; /* Menu'de mouse görünsün */
+        }
+        canvas {
+            display: block;
+            background: #111; /* Canvas arka planı koyu */
+        }
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 20px;
+            text-shadow: 0 0 4px rgba(0,0,0,0.7);
+        }
+        #health {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: white;
+            font-size: 20px;
+            text-shadow: 0 0 4px rgba(0,0,0,0.7);
+        }
+        #ammo {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            color: white;
+            font-size: 20px;
+            text-shadow: 0 0 4px rgba(0,0,0,0.7);
+        }
+        #ulti {
+            position: absolute;
+            bottom: 40px;
+            right: 10px;
+            color: white;
+            font-size: 20px;
+            text-shadow: 0 0 4px rgba(0,0,0,0.7);
+        }
+        #collectTimer {
+            position: absolute;
+            bottom: 70px;
+            right: 10px;
+            color: white;
+            font-size: 20px;
+            text-shadow: 0 0 4px rgba(0,0,0,0.7);
+        }
+    </style>
+<body>
+    <div id="menu" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; background: white; padding: 20px; border: 2px solid black;">
+        <h1>FAAVZORANT</h1>
+        <button id="playBtn">Oyna</button>
+        <div id="modeSelect" style="display: none; margin-top: 20px;">
+            <button id="practiceBtn">Practice Mode</button>
+            <button id="settingsBtn">Ayarlar</button>
+            <button id="otherBtn" disabled>Diğer Mod (Sonra)</button>
+        </div>
+        <div id="settings" style="display: none; margin-top: 20px;">
+            <label><input type="checkbox" id="fpsCheckbox"> FPS Göster</label><br><br>
+            <button id="backBtn">Geri</button>
+        </div>
+    </div>
+    <div id="health">Can: 100</div>
+    <div id="ui" style="display: none;">Skor: 0 | Düşmanlar: 10</div>
+    <div id="healthHidden" style="display: none;">Can: 100</div>
+    <div id="ammo" style="display: none;">Mermi: 30/30</div>
+    <div id="ulti" style="display: none;">Ulti: Hazır Değil</div>
+    <div id="collectTimer" style="display: none;">Toplama: 0%</div>
+    <div id="deathScreen" style="display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: black; color: white; padding: 20px; text-align: center;">
+        <div id="deathMessage">ÖLDÜN! Menüye aktarılıyorsun...</div>
+    </div>
+    <div id="winScreen" style="display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: green; color: white; padding: 20px; text-align: center;">
+        <div id="winMessage">KAZANDIN! Menüye aktarılıyorsun...</div>
+    </div>
+    <canvas id="gameCanvas" width="800" height="600" style="display: none;"></canvas>
+    <script>
+        // Menu event'leri
+        document.getElementById('playBtn').addEventListener('click', () => {
+            document.getElementById('modeSelect').style.display = 'block';
+            document.getElementById('playBtn').style.display = 'none'; // Buton yok olsun
+        });
+        document.getElementById('practiceBtn').addEventListener('click', startGame);
+        document.getElementById('settingsBtn').addEventListener('click', () => {
+            document.getElementById('modeSelect').style.display = 'none';
+            document.getElementById('settings').style.display = 'block';
+        });
+        document.getElementById('backBtn').addEventListener('click', () => {
+            document.getElementById('settings').style.display = 'none';
+            document.getElementById('modeSelect').style.display = 'block';
+        });
+        document.getElementById('fpsCheckbox').addEventListener('change', (e) => {
+            showFPS = e.target.checked;
+        });
+
+        function startGame() {
+            // Oyuncu reset
+            player.x = window.innerWidth * 0.1;
+            player.y = window.innerHeight / 2;
+            player.health = 100;
+            player.weapon = 'pistol';
+            player.ammo = { pistol: 30, rifle: 30, knife: Infinity };
+            player.ultiReady = false;
+            player.collectingUlti = false;
+            player.collectTimer = 0;
+            if (player.reloadTimer) clearTimeout(player.reloadTimer);
+            player.reloadTimer = null;
+            // Düşmanlar reset (5 düşman)
+            enemies = [];
+            for (let i = 0; i < 5; i++) {
+                enemies.push({
+                    x: window.innerWidth * 0.9 + Math.random() * 50,
+                    y: window.innerHeight * 0.3 + Math.random() * window.innerHeight * 0.4,
+                    health: 100,
+                    speed: 1,
+                    angle: 0,
+                    lastShot: 0,
+                    ultiReady: false,
+                    collectingUlti: false,
+                    collectTimer: 0
+                });
+            }
+            // Power-ups reset
+            powerUps.forEach(powerUp => powerUp.collected = false);
+            bullets = [];
+            // UI
+            document.getElementById('menu').style.display = 'none';
+            document.getElementById('gameCanvas').style.display = 'block';
+            document.getElementById('ui').style.display = 'block';
+            document.getElementById('health').style.display = 'block';
+            document.getElementById('ammo').style.display = 'block';
+            document.getElementById('ulti').style.display = 'block';
+            document.body.style.cursor = 'none'; // Oyun modunda mouse kaybolsun
+            gameActive = true;
+            gameLoop();
+        }
+
+        function goToMenu() {
+            gameActive = false;
+            if (menuTimeout) {
+                clearTimeout(menuTimeout);
+                menuTimeout = null;
+            }
+            document.getElementById('deathScreen').style.display = 'none';
+            document.getElementById('winScreen').style.display = 'none';
+            document.getElementById('menu').style.display = 'block';
+            document.getElementById('modeSelect').style.display = 'none';
+            document.getElementById('playBtn').style.display = 'block'; // Tekrar göster
+            document.getElementById('gameCanvas').style.display = 'none';
+            document.getElementById('ui').style.display = 'none';
+            document.getElementById('health').style.display = 'none';
+            document.getElementById('ammo').style.display = 'none';
+            document.getElementById('ulti').style.display = 'none';
+            document.getElementById('collectTimer').style.display = 'none';
+            document.body.style.cursor = 'default'; // Menu'de mouse görünsün
+        }
+
+        function showLoseScreen() {
+            gameActive = false;
+            document.getElementById('deathMessage').innerText = 'OLDUN! Menüye aktarılıyorsun...';
+            document.getElementById('deathScreen').style.display = 'block';
+            document.body.style.cursor = 'default';
+            if (menuTimeout) clearTimeout(menuTimeout);
+            menuTimeout = setTimeout(goToMenu, 1000);
+        }
+
+        function showWinScreen() {
+            gameActive = false;
+            document.getElementById('winMessage').innerText = 'KAZANDIN! Menüye aktarılıyorsun...';
+            document.getElementById('winScreen').style.display = 'block';
+            document.body.style.cursor = 'default';
+            if (menuTimeout) clearTimeout(menuTimeout);
+            menuTimeout = setTimeout(goToMenu, 1000);
+        }
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+        let gameActive = false;
+        let menuTimeout = null;
+        let showFPS = false;
+        let fps = 0;
+        let lastTime = performance.now();
+
+        // Oyuncu
+        let player = {
+            x: window.innerWidth * 0.1,
+            y: window.innerHeight / 2,
+            angle: 0,
+            health: 100,
+            speed: 2,
+            weapon: 'pistol',
+            ammo: { pistol: 30, rifle: 30, knife: Infinity },
+            ultiReady: false, // Normalde ultisiz
+            reloadTimer: null,
+            collectingUlti: false,
+            collectTimer: 0
+        };
+
+        // Düşmanlar
+        let enemies = [];
+        for (let i = 0; i < 5; i++) {
+            enemies.push({
+                x: window.innerWidth * 0.9 + Math.random() * 50,
+                y: window.innerHeight * 0.3 + Math.random() * window.innerHeight * 0.4,
+                health: 100,
+                speed: 1,
+                angle: 0,
+                lastShot: 0,
+                ultiReady: false,
+                collectingUlti: false,
+                collectTimer: 0
+            });
+        }
+
+        // Duvarlar
+        let walls = [
+            { x: 0, y: 0, w: window.innerWidth, h: 20 }, // Üst
+            { x: 0, y: window.innerHeight - 20, w: window.innerWidth, h: 20 }, // Alt
+            { x: 0, y: 0, w: 20, h: window.innerHeight }, // Sol
+            { x: window.innerWidth - 20, y: 0, w: 20, h: window.innerHeight }, // Sağ
+            { x: window.innerWidth / 2 - 10, y: window.innerHeight / 4, w: 20, h: window.innerHeight / 2 }, // Orta duvar
+            { x: window.innerWidth / 4, y: window.innerHeight / 2 - 10, w: window.innerWidth / 2, h: 20 }, // Yatay duvar
+            { x: window.innerWidth * 0.75 - 10, y: window.innerHeight * 0.25, w: 20, h: window.innerHeight / 2 } // Sağ duvar
+        ];
+
+        // Çiçekler
+        let flowers = [
+            { x: window.innerWidth * 0.2, y: window.innerHeight * 0.4, color: 'pink' },
+            { x: window.innerWidth * 0.8, y: window.innerHeight * 0.6, color: 'yellow' },
+            { x: window.innerWidth * 0.5, y: window.innerHeight * 0.2, color: 'blue' },
+            { x: window.innerWidth * 0.7, y: window.innerHeight * 0.8, color: 'purple' },
+            { x: window.innerWidth * 0.3, y: window.innerHeight * 0.7, color: 'orange' },
+            { x: window.innerWidth * 0.6, y: window.innerHeight * 0.3, color: 'green' },
+            { x: window.innerWidth * 0.1, y: window.innerHeight * 0.9, color: 'red' },
+            { x: window.innerWidth * 0.9, y: window.innerHeight * 0.1, color: 'cyan' }
+        ];
+
+        // Ulti power-up'ları (gri şeyler)
+        let powerUps = [];
+        for (let i = 0; i < 20; i++) { // Daha fazla power-up
+            powerUps.push({
+                x: Math.random() * window.innerWidth,
+                y: Math.random() * window.innerHeight,
+                radius: 15,
+                collected: false
+            });
+        }
+
+        // Mermiler
+        let bullets = [];
+
+        // Tuşlar
+        let keys = {};
+        document.addEventListener('keydown', (e) => {
+            keys[e.code] = true;
+            if (e.code === 'KeyQ' && player.ultiReady) useUlti();
+            if (e.code === 'KeyO') resetGame(); // O tuşu ile yeniden başlat
+            if (e.code === 'KeyE') player.collectingUlti = true;
+        });
+        document.addEventListener('keyup', (e) => {
+            keys[e.code] = false;
+            if (e.code === 'KeyE') {
+                player.collectingUlti = false;
+                player.collectTimer = 0;
+            }
+        });
+
+        // Fare
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            let dx = e.clientX - rect.left - player.x;
+            let dy = e.clientY - rect.top - player.y;
+            player.angle = Math.atan2(dy, dx);
+        });
+
+        canvas.addEventListener('click', () => shoot());
+
+        function shoot() {
+            if (player.weapon === 'knife') {
+                enemies.forEach((enemy, i) => {
+                    let dist = Math.sqrt((enemy.x - player.x)**2 + (enemy.y - player.y)**2);
+                    if (dist < 50) {
+                        enemy.health -= 50;
+                        if (enemy.health <= 0) enemies.splice(i, 1);
+                    }
+                });
+            } else if (player.weapon === 'pistol' && player.ammo.pistol > 0) {
+                player.ammo.pistol--;
+                createBullet(player.x, player.y, player.angle, 10);
+                if (player.ammo.pistol === 0) reloadAmmo('pistol');
+            } else if (player.weapon === 'rifle' && player.ammo.rifle > 0) {
+                player.ammo.rifle--;
+                createBullet(player.x, player.y, player.angle, 15);
+                if (player.ammo.rifle === 0) reloadAmmo('rifle');
+            }
+        }
+
+        function reloadAmmo(weapon) {
+            if (player.reloadTimer) clearTimeout(player.reloadTimer);
+            player.reloadTimer = setTimeout(() => {
+                player.ammo[weapon] = 30;
+                player.reloadTimer = null;
+            }, 3000);
+        }
+
+        function createBullet(x, y, angle, speed, owner = 'player') {
+            let startX = x;
+            let startY = y;
+            if (owner === 'enemy') {
+                startX += Math.cos(angle) * 20;
+                startY += Math.sin(angle) * 20;
+            }
+            bullets.push({
+                x: startX,
+                y: startY,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                owner: owner
+            });
+        }
+
+        function resetGame() {
+            player.x = window.innerWidth * 0.1;
+            player.y = window.innerHeight / 2;
+            player.health = 100;
+            player.weapon = 'pistol';
+            player.ammo = { pistol: 30, rifle: 30, knife: Infinity };
+            player.ultiReady = false;
+            player.collectingUlti = false;
+            player.collectTimer = 0;
+            if (player.reloadTimer) clearTimeout(player.reloadTimer);
+            player.reloadTimer = null;
+            enemies = [];
+            for (let i = 0; i < 5; i++) {
+                enemies.push({
+                    x: window.innerWidth * 0.9 + Math.random() * 50,
+                    y: window.innerHeight * 0.3 + Math.random() * window.innerHeight * 0.4,
+                    health: 100,
+                    speed: 1,
+                    angle: 0,
+                    lastShot: 0,
+                    ultiReady: false,
+                    collectingUlti: false,
+                    collectTimer: 0
+                });
+            }
+            powerUps.forEach(powerUp => powerUp.collected = false);
+            bullets = [];
+            document.getElementById('deathScreen').style.display = 'none';
+            document.getElementById('winScreen').style.display = 'none';
+            document.body.style.cursor = 'none'; // Oyun devam ediyor, mouse kaybolsun
+            gameActive = true;
+        }
+
+        function useEnemyUlti(enemy) {
+            enemy.ultiReady = false;
+            let newX = enemy.x + Math.cos(enemy.angle) * 80; // Daha kısa ulti
+            let newY = enemy.y + Math.sin(enemy.angle) * 80;
+            // Duvar kontrolü
+            let canMove = true;
+            walls.forEach(wall => {
+                if (newX > wall.x && newX < wall.x + wall.w && newY > wall.y && newY < wall.y + wall.h) {
+                    canMove = false;
+                }
+            });
+            if (canMove) {
+                enemy.x = newX;
+                enemy.y = newY;
+            }
+        }
+
+        function update() {
+            // Hareket
+            if (keys['KeyW']) player.y -= player.speed;
+            if (keys['KeyS']) player.y += player.speed;
+            if (keys['KeyA']) player.x -= player.speed;
+            if (keys['KeyD']) player.x += player.speed;
+
+            // Duvar çarpışması
+            walls.forEach(wall => {
+                if (player.x > wall.x && player.x < wall.x + wall.w && player.y > wall.y && player.y < wall.y + wall.h) {
+                    if (keys['KeyW']) player.y += player.speed;
+                    if (keys['KeyS']) player.y -= player.speed;
+                    if (keys['KeyA']) player.x += player.speed;
+                    if (keys['KeyD']) player.x -= player.speed;
+                }
+            });
+
+            // Düşman AI
+            enemies.forEach(enemy => {
+                // Hedef seç: Beni görürse saldır, görmezse dur
+                let targetX = player.x;
+                let targetY = player.y;
+
+                let dx = targetX - enemy.x;
+                let dy = targetY - enemy.y;
+                let dist = Math.sqrt(dx*dx + dy*dy);
+                let moveX = 0;
+                let moveY = 0;
+
+                if (dist > 10) { // 10 piksele kadar yaklaş
+                    moveX = (dx / dist) * enemy.speed;
+                    moveY = (dy / dist) * enemy.speed;
+                }
+
+                // Power-up toplama kaldırıldı, düşmanlar sadece saldırır
+
+                if (enemy.collectingUlti) {
+                    enemy.collectingUlti = false;
+                    enemy.collectTimer = 0;
+                }
+
+                // Mermi dodge: Daha gelişmiş, ama ulti olmadan
+                let dodgeX = 0;
+                let dodgeY = 0;
+                let dangerCount = 0;
+                bullets.forEach(bullet => {
+                    if (bullet.owner === 'player') {
+                        let bdx = bullet.x - enemy.x;
+                        let bdy = bullet.y - enemy.y;
+                        let bdist = Math.sqrt(bdx*bdx + bdy*bdy);
+                        if (bdist < 200) { // Daha geniş alan
+                            let bulletSpeed = Math.sqrt(bullet.vx*bullet.vx + bullet.vy*bullet.vy);
+                            let dot = (bdx * bullet.vx + bdy * bullet.vy) / (bdist * bulletSpeed);
+                            if (dot > 0.1) { // Daha hassas yaklaşan
+                                dangerCount++;
+                                let perpX = -bullet.vy;
+                                let perpY = bullet.vx;
+                                dodgeX += perpX / Math.sqrt(perpX*perpX + perpY*perpY);
+                                dodgeY += perpY / Math.sqrt(perpX*perpX + perpY*perpY);
+                            }
+                        }
+                    }
+                });
+                if (dangerCount > 0) {
+                    dodgeX /= dangerCount;
+                    dodgeY /= dangerCount;
+                    moveX += dodgeX * enemy.speed * 2;
+                    moveY += dodgeY * enemy.speed * 2;
+                }
+
+                // Duvar kontrolü ve gelişmiş pathfinding
+                let newX = enemy.x + moveX;
+                let newY = enemy.y + moveY;
+                let blocked = false;
+                walls.forEach(wall => {
+                    if (newX > wall.x && newX < wall.x + wall.w && newY > wall.y && newY < wall.y + wall.h) {
+                        blocked = true;
+                    }
+                });
+
+                if (blocked) {
+                    // Duvar etrafından dolaş: Duvarın sol veya sağ ucuna doğru hareket et
+                    let wall = null;
+                    walls.forEach(w => {
+                        if (newX > w.x && newX < w.x + w.w && newY > w.y && newY < w.y + w.h) {
+                            wall = w;
+                        }
+                    });
+                    if (wall) {
+                        // Duvarın sol ucuna git
+                        let leftX = wall.x - 20;
+                        let leftY = wall.y + wall.h / 2;
+                        let distLeft = Math.sqrt((leftX - enemy.x)**2 + (leftY - enemy.y)**2);
+                        // Sağ ucuna git
+                        let rightX = wall.x + wall.w + 20;
+                        let rightY = wall.y + wall.h / 2;
+                        let distRight = Math.sqrt((rightX - enemy.x)**2 + (rightY - enemy.y)**2);
+                        if (distLeft < distRight) {
+                            newX = enemy.x + (leftX - enemy.x) / distLeft * enemy.speed;
+                            newY = enemy.y + (leftY - enemy.y) / distLeft * enemy.speed;
+                        } else {
+                            newX = enemy.x + (rightX - enemy.x) / distRight * enemy.speed;
+                            newY = enemy.y + (rightY - enemy.y) / distRight * enemy.speed;
+                        }
+                        // Yeni konum duvar içinde mi kontrol et
+                        blocked = false;
+                        walls.forEach(w => {
+                            if (newX > w.x && newX < w.x + w.w && newY > w.y && newY < w.y + w.h) {
+                                blocked = true;
+                            }
+                        });
+                        if (!blocked) {
+                            enemy.x = newX;
+                            enemy.y = newY;
+                        } else {
+                            // Alternatif: Yukarı veya aşağı
+                            let upY = wall.y - 20;
+                            let downY = wall.y + wall.h + 20;
+                            let distUp = Math.abs(upY - enemy.y);
+                            let distDown = Math.abs(downY - enemy.y);
+                            if (distUp < distDown) {
+                                newY = enemy.y + (upY - enemy.y) / distUp * enemy.speed;
+                            } else {
+                                newY = enemy.y + (downY - enemy.y) / distDown * enemy.speed;
+                            }
+                            newX = enemy.x;
+                            blocked = false;
+                            walls.forEach(w => {
+                                if (newX > w.x && newX < w.x + w.w && newY > w.y && newY < w.y + w.h) {
+                                    blocked = true;
+                                }
+                            });
+                            if (!blocked) {
+                                enemy.x = newX;
+                                enemy.y = newY;
+                            }
+                        }
+                    }
+                } else {
+                    enemy.x += moveX;
+                    enemy.y += moveY;
+                }
+
+                enemy.angle = Math.atan2(dy, dx);
+
+                // Ateş
+                let playerDist2 = Math.sqrt((player.x - enemy.x)**2 + (player.y - enemy.y)**2);
+                if (playerDist2 < 200 && playerDist2 > 50 && Date.now() - enemy.lastShot > 1200) {
+                    createBullet(enemy.x, enemy.y, enemy.angle, 8, 'enemy');
+                    enemy.lastShot = Date.now();
+                }
+
+                // Ulti kullan kaldırıldı, düşmanlar ulti kullanamaz
+            });
+
+            // Düşman duvar çarpışması kaldırıldı, AI içinde var
+
+            // Mermi güncelleme
+            bullets.forEach((bullet, i) => {
+                bullet.x += bullet.vx;
+                bullet.y += bullet.vy;
+                // Çarpışma
+                if (bullet.owner === 'player') {
+                    enemies.forEach((enemy, j) => {
+                        let dist = Math.sqrt((enemy.x - bullet.x)**2 + (enemy.y - bullet.y)**2);
+                        if (dist < 20) {
+                            enemy.health -= 25;
+                            if (enemy.health <= 0) enemies.splice(j, 1);
+                            bullets.splice(i, 1);
+                        }
+                    });
+                } else {
+                    // Düşman mermisi oyuncu vurdu
+                    let dist = Math.sqrt((player.x - bullet.x)**2 + (player.y - bullet.y)**2);
+                    if (dist < 20) {
+                        player.health -= 10;
+                        bullets.splice(i, 1);
+                    }
+                }
+                // Duvar çarpışması
+                let hitWall = false;
+                walls.forEach(wall => {
+                    if (bullet.x > wall.x && bullet.x < wall.x + wall.w && bullet.y > wall.y && bullet.y < wall.y + wall.h) {
+                        hitWall = true;
+                    }
+                });
+                if (hitWall || bullet.x < 0 || bullet.x > window.innerWidth || bullet.y < 0 || bullet.y > window.innerHeight) {
+                    bullets.splice(i, 1);
+                }
+            });
+
+            // UI
+            let uiText = `Skor: ${5 - enemies.length} | Düşmanlar: ${enemies.length}`;
+            if (showFPS) {
+                uiText = `FPS: ${fps.toFixed(0)} | ` + uiText;
+            }
+            document.getElementById('ui').innerText = uiText;
+            document.getElementById('health').innerText = `Can: ${player.health}`;
+            document.getElementById('ammo').innerText = `Mermi: ${player.ammo[player.weapon]}/${player.weapon === 'knife' ? '∞' : 30}`;
+            document.getElementById('ulti').innerText = `Ulti: ${player.ultiReady ? 'Hazır' : 'Hazır Değil'}`;
+
+            // Power-up toplama
+            let nearPowerUp = false;
+            let closestPowerUp = null;
+            powerUps.forEach((powerUp, i) => {
+                if (!powerUp.collected) {
+                    let dist = Math.sqrt((powerUp.x - player.x)**2 + (powerUp.y - player.y)**2);
+                    if (dist < 50) {
+                        nearPowerUp = true;
+                        closestPowerUp = powerUp;
+                        if (player.collectingUlti) {
+                            player.collectTimer += 1/60; // 60 FPS varsayalım
+                            if (player.collectTimer >= 0.5) { // Kısaltıldı
+                                player.ultiReady = true;
+                                powerUp.collected = true;
+                                player.collectingUlti = false;
+                                player.collectTimer = 0;
+                            }
+                        } else {
+                            player.collectTimer = 0;
+                        }
+                    }
+                }
+            });
+            if (nearPowerUp && player.collectingUlti) {
+                document.getElementById('collectTimer').style.display = 'block';
+                document.getElementById('collectTimer').innerText = `Toplama: ${Math.min(100, (player.collectTimer / 0.5) * 100).toFixed(0)}%`;
+            } else {
+                document.getElementById('collectTimer').style.display = 'none';
+            }
+
+            // Ölüm kontrolü
+            if (player.health <= 0 && gameActive) {
+                showLoseScreen();
+            }
+
+            // Kazanma kontrolü
+            if (enemies.length === 0 && gameActive) {
+                showWinScreen();
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+            // Arka plan
+            ctx.fillStyle = '#222';
+            ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+
+            // Zemin desen
+            ctx.strokeStyle = '#2c2c2c';
+            ctx.lineWidth = 1;
+            for (let gx = 0; gx < window.innerWidth; gx += 80) {
+                ctx.beginPath();
+                ctx.moveTo(gx, 0);
+                ctx.lineTo(gx, window.innerHeight);
+                ctx.stroke();
+            }
+            for (let gy = 0; gy < window.innerHeight; gy += 80) {
+                ctx.beginPath();
+                ctx.moveTo(0, gy);
+                ctx.lineTo(window.innerWidth, gy);
+                ctx.stroke();
+            }
+
+            // Duvarlar
+            ctx.fillStyle = 'gray';
+            walls.forEach(wall => ctx.fillRect(wall.x, wall.y, wall.w, wall.h));
+
+            // Çiçekler
+            flowers.forEach(flower => {
+                ctx.fillStyle = flower.color;
+                ctx.beginPath();
+                ctx.arc(flower.x, flower.y, 10, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // Power-ups (gri şeyler)
+            powerUps.forEach(powerUp => {
+                if (!powerUp.collected) {
+                    ctx.fillStyle = 'gray';
+                    ctx.beginPath();
+                    ctx.arc(powerUp.x, powerUp.y, powerUp.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+
+            // Oyuncu
+            ctx.save();
+            ctx.translate(player.x, player.y);
+            ctx.rotate(player.angle);
+            // Vücut
+            ctx.fillStyle = 'blue';
+            ctx.beginPath();
+            ctx.arc(0, 0, 15, 0, Math.PI * 2);
+            ctx.fill();
+            // Kafa
+            ctx.fillStyle = 'lightblue';
+            ctx.beginPath();
+            ctx.arc(0, -20, 10, 0, Math.PI * 2);
+            ctx.fill();
+            // Gözler
+            ctx.fillStyle = 'black';
+            ctx.beginPath();
+            ctx.arc(-3, -22, 1.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(3, -22, 1.5, 0, Math.PI * 2);
+            ctx.fill();
+            // Ağız
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(0, -18, 3, 0, Math.PI);
+            ctx.stroke();
+            // Silah
+            ctx.fillStyle = 'gray';
+            ctx.fillRect(15, -8, 30, 16); // Daha büyük silah
+            ctx.fillStyle = 'black';
+            ctx.fillRect(15, -5, 35, 10); // Namlu
+            ctx.restore();
+
+            // Düşmanlar
+            ctx.fillStyle = 'red';
+            enemies.forEach(enemy => {
+                ctx.save();
+                ctx.translate(enemy.x, enemy.y);
+                ctx.rotate(enemy.angle);
+                // Vücut
+                ctx.beginPath();
+                ctx.arc(0, 0, 15, 0, Math.PI * 2);
+                ctx.fill();
+                // Kafa
+                ctx.fillStyle = 'darkred';
+                ctx.beginPath();
+                ctx.arc(0, -20, 10, 0, Math.PI * 2);
+                ctx.fill();
+                // Gözler
+                ctx.fillStyle = 'black';
+                ctx.beginPath();
+                ctx.arc(-3, -22, 1.5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(3, -22, 1.5, 0, Math.PI * 2);
+                ctx.fill();
+                // Ağız (kızgın)
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.arc(0, -16, 3, Math.PI, 0);
+                ctx.stroke();
+                // Silah
+                ctx.fillStyle = 'gray';
+                ctx.fillRect(15, -8, 30, 16);
+                ctx.fillStyle = 'black';
+                ctx.fillRect(15, -5, 35, 10);
+                ctx.restore();
+            });
+
+            // Mermiler
+            ctx.fillStyle = '#cccc00'; // Koyu sarı
+            bullets.forEach(bullet => ctx.fillRect(bullet.x - 2, bullet.y - 2, 4, 4));
+        }
+
+        function gameLoop() {
+            if (gameActive) {
+                let now = performance.now();
+                fps = 1000 / (now - lastTime);
+                lastTime = now;
+                update();
+                draw();
+            }
+            requestAnimationFrame(gameLoop);
+        }
+        gameLoop();
+    </script>
+</body>
+</html>
